@@ -279,7 +279,10 @@
 
         setStatus('connecting', 'Connecting WebRTC Peer...');
         peerConnection = new RTCPeerConnection({
-          iceServers: []
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
         });
 
         // Add local tracks to WebRTC
@@ -294,14 +297,20 @@
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
 
-        // Wait for ICE candidate gathering to finish (Vanilla WebRTC style)
+        // Wait for ICE candidate gathering to finish with a 3s timeout fallback
         setStatus('connecting', 'Finalizing ICE Candidates...');
         await new Promise((resolve) => {
           if (peerConnection.iceGatheringState === 'complete') {
             resolve();
           } else {
+            const timeout = setTimeout(() => {
+              peerConnection.removeEventListener('icegatheringstatechange', checkState);
+              resolve();
+            }, 3000);
+
             function checkState() {
               if (peerConnection.iceGatheringState === 'complete') {
+                clearTimeout(timeout);
                 peerConnection.removeEventListener('icegatheringstatechange', checkState);
                 resolve();
               }

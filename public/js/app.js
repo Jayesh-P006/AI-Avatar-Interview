@@ -908,13 +908,14 @@ class AppOrchestrator {
       // Compress to JPEG at 0.7 quality to keep base64 size small
       const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
       const base64string = dataUrl.replace(/^data:image\/jpeg;base64,/, "");
+      const customKey = this.apiKeyInput ? this.apiKeyInput.value.trim() : '';
 
       const response = await fetch('/api/detect-mobile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ image: base64string })
+        body: JSON.stringify({ image: base64string, groqApiKey: customKey })
       });
 
       if (!response.ok) {
@@ -923,9 +924,15 @@ class AppOrchestrator {
 
       const result = await response.json();
       const timeStr = new Date().toLocaleTimeString();
+
+      if (!result.success) {
+        console.error(`[MobileDetect] ${timeStr} — detection failed:`, result.error || "Unknown server error");
+        return;
+      }
+
       console.log(`[MobileDetect] ${timeStr} — detected: ${result.mobile_detected} | confidence: ${result.confidence}`);
 
-      if (result.success && result.mobile_detected === true) {
+      if (result.mobile_detected === true) {
         if (result.confidence === "high" || result.confidence === "medium") {
           this.handleMobileViolation(result.location, result.screenshot);
         } else if (result.confidence === "low") {
@@ -1060,10 +1067,13 @@ class AppOrchestrator {
       const sessionId = 'session-' + Math.random().toString(36).substring(2, 15);
       console.log("[MobileDetect] Generating phone connection session:", sessionId);
 
-      // Create peer connection. Since we are connecting over local Wi-Fi, 
-      // we do not need external STUN servers, which speeds up candidate gathering to 0ms.
+      // Create peer connection. Configure public STUN servers so WebRTC can connect
+      // across different networks / over the internet (e.g. deployed on Railway).
       const pc = new RTCPeerConnection({
-        iceServers: []
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
       });
       this.peerConnection = pc;
 
@@ -1088,15 +1098,21 @@ class AppOrchestrator {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      // Wait for ICE gathering to complete (Vanilla WebRTC style - instant with iceServers:[])
+      // Wait for ICE gathering to complete with a 3s timeout fallback
       if (pc.iceGatheringState !== 'complete') {
         await new Promise((resolve) => {
-          const checkState = () => {
+          const timeout = setTimeout(() => {
+            pc.removeEventListener('icegatheringstatechange', checkState);
+            resolve();
+          }, 3000);
+
+          function checkState() {
             if (pc.iceGatheringState === 'complete') {
+              clearTimeout(timeout);
               pc.removeEventListener('icegatheringstatechange', checkState);
               resolve();
             }
-          };
+          }
           pc.addEventListener('icegatheringstatechange', checkState);
         });
       }

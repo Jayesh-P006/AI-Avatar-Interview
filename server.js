@@ -1425,24 +1425,24 @@ app.get('/api/tts', async (req, res) => {
 // Endpoint 4: Real-time Mobile Phone Detection using Groq Vision
 app.post('/api/detect-mobile', async (req, res) => {
   try {
-    const { image } = req.body;
+    const { image, groqApiKey } = req.body;
     if (!image) {
       return res.status(400).json({ success: false, error: "Image data is required" });
     }
 
-    const primaryKey = process.env.GROQ_API_KEY;
+    const primaryKey = groqApiKey || process.env.GROQ_API_KEY;
     const secondaryKey = process.env.SECONDARY_GROQ_API_KEY;
 
     const keysToTry = [];
     if (primaryKey) {
-      keysToTry.push({ key: primaryKey, label: "primary" });
+      keysToTry.push({ key: primaryKey, label: groqApiKey ? "custom frontend" : "primary" });
     }
     if (secondaryKey && secondaryKey !== primaryKey) {
       keysToTry.push({ key: secondaryKey, label: "secondary fallback" });
     }
 
     if (keysToTry.length === 0) {
-      return res.status(500).json({ success: false, error: "GROQ_API_KEY is not configured on the server" });
+      return res.status(500).json({ success: false, error: "GROQ_API_KEY is not configured on the server or frontend" });
     }
 
     const systemPrompt = `You are a strict proctoring system for an online interview.
