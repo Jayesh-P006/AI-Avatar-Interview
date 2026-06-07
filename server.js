@@ -6,6 +6,8 @@ import os from 'os';
 import fs from 'fs';
 import https from 'https';
 import { Jimp } from 'jimp';
+import { spawn } from 'child_process';
+import crypto from 'crypto';
 
 // Load environment variables
 dotenv.config();
@@ -1341,59 +1343,89 @@ function splitTextIntoChunks(text, maxLength = 180) {
 }
 
 // Endpoint 3: Text-to-Speech proxy to route audio to specific output device (headphones)
-app.get('/api/tts', async (req, res) => {
+// Handler for Text-to-Speech synthesis using local Coqui TTS or Google fallback
+async function ttsHandler(req, res) {
   try {
-    const text = req.query.text;
+    const text = req.query.text || req.body?.text;
     if (!text) {
-      return res.status(400).json({ error: "Text query parameter is required" });
+      return res.status(400).json({ error: "Text parameter is required" });
     }
 
-    // Intercept springtime text to serve static high-quality sample file directly
-    const cleanQueryText = text.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
-    const cleanTargetText = "In springtime, the garden comes alive with colorful flowers and singing birds. The old oak tree provides shade for visitors, while butterflies dance among the roses. A small fountain creates peaceful sounds, making this the perfect spot to relax and enjoy nature's beauty.".toLowerCase().replace(/[^a-z0-9]/g, '').trim();
-    
-    if (cleanQueryText === cleanTargetText) {
-      console.log("[TTS Proxy] Serving static sample audio for target springtime text.");
-      return res.sendFile(path.join(__dirname, 'public', 'sample.mp3'));
-    }
+    // Generate a unique temp file path in OS temp directory
+    const tempFile = path.join(os.tmpdir(), `tts_${crypto.randomUUID()}.wav`);
+    console.log(`[Coqui TTS] Synthesizing text: "${text.substring(0, 30)}..." to ${tempFile}`);
 
-    const voiceId = req.query.voice || 'YZHSTqsq1isdXNsFLzBw';
-    const model = req.query.model || 'elevenlabs';
-    const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+    // Spawn the Python process
+    const python = spawn('python', [
+      path.join(__dirname, 'coqui_tts.py'),
+      text,
+      tempFile
+    ]);
 
-    if (model === 'elevenlabs' && ELEVENLABS_API_KEY) {
-      console.log(`[ElevenLabs TTS] Generating speech using voice: ${voiceId}`);
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'xi-api-key': ELEVENLABS_API_KEY
-        },
-        body: JSON.stringify({
-          text: text,
-          model_id: 'eleven_multilingual_v2',
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75
-          }
-        })
-      });
+    let stdoutData = '';
+    let stderrData = '';
 
-      if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.send(Buffer.from(arrayBuffer));
-        return;
-      } else {
-        const errText = await response.text();
-        console.warn(`[ElevenLabs TTS] API error: ${response.status} ${errText}. Falling back to Google TTS.`);
+    python.stdout.on('data', (data) => {
+      stdoutData += data.toString();
+    });
+
+    python.stderr.on('data', (data) => {
+      stderrData += data.toString();
+    });
+
+    // Timeout logic: if process takes longer than 15 seconds, kill it
+    let killedByTimeout = false;
+    const timeout = setTimeout(() => {
+      console.warn(`[Coqui TTS] Process timed out after 15 seconds. Killing it.`);
+      killedByTimeout = true;
+      try {
+        python.kill();
+      } catch (err) {
+        console.error("[Coqui TTS] Error killing python process:", err);
       }
-    } else if (model === 'elevenlabs') {
-      console.warn(`[ElevenLabs TTS] ELEVENLABS_API_KEY is not configured in .env. Falling back to Google TTS.`);
+    }, 15000);
+
+    // Promise that resolves on process exit/close
+    const exitCode = await new Promise((resolve) => {
+      python.on('close', (code) => {
+        clearTimeout(timeout);
+        resolve(code);
+      });
+      python.on('error', (err) => {
+        clearTimeout(timeout);
+        console.error("[Coqui TTS] Python process spawn error:", err);
+        resolve(-1);
+      });
+    });
+
+    if (!killedByTimeout && exitCode === 0 && stdoutData.includes("SUCCESS")) {
+      try {
+        if (fs.existsSync(tempFile)) {
+          const buffer = fs.readFileSync(tempFile);
+          res.setHeader('Content-Type', 'audio/wav');
+          res.send(buffer);
+          
+          // Cleanup temp file asynchronously
+          fs.unlink(tempFile, (err) => {
+            if (err) console.error("[Coqui TTS] Failed to delete temp file:", err);
+          });
+          return;
+        } else {
+          console.warn("[Coqui TTS] Process returned SUCCESS but temp file was not found.");
+        }
+      } catch (readErr) {
+        console.error("[Coqui TTS] Error reading/deleting temp file:", readErr);
+      }
+    }
+
+    // Coqui failed or timed out. Cleanup temp file and fallback.
+    console.warn(`[Coqui TTS] Failed (code: ${exitCode}). stdout: ${stdoutData.trim()}, stderr: ${stderrData.trim()}. Falling back to Google TTS.`);
+    if (fs.existsSync(tempFile)) {
+      try { fs.unlinkSync(tempFile); } catch (e) {}
     }
 
     // Google Translate TTS Fallback
-    console.log(`[Google TTS] Generating speech for chunk: "${text.substring(0, 30)}..."`);
+    console.log(`[Google TTS Fallback] Generating speech for text: "${text.substring(0, 30)}..."`);
     const chunks = splitTextIntoChunks(text);
     const audioBuffers = [];
 
@@ -1416,11 +1448,15 @@ app.get('/api/tts', async (req, res) => {
     const combinedBuffer = Buffer.concat(audioBuffers);
     res.setHeader('Content-Type', 'audio/mpeg');
     res.send(combinedBuffer);
+
   } catch (error) {
-    console.error("TTS proxy error:", error);
-    res.status(500).json({ error: "Failed to generate TTS audio: " + error.message });
+    console.error("[TTS Proxy] Final fallback error:", error);
+    res.status(500).json({ error: "TTS service unavailable" });
   }
-});
+}
+
+app.get('/api/tts', ttsHandler);
+app.post('/api/tts', ttsHandler);
 
 // Endpoint 4: Real-time Mobile Phone Detection using Groq Vision
 app.post('/api/detect-mobile', async (req, res) => {
