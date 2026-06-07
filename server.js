@@ -1352,7 +1352,7 @@ async function ttsHandler(req, res) {
     }
 
     // Generate a unique temp file path in OS temp directory
-    const tempFile = path.join(os.tmpdir(), `tts_${crypto.randomUUID()}.wav`);
+    const tempFile = path.join(os.tmpdir(), `tts_${crypto.randomUUID()}.mp3`);
     console.log(`[Coqui TTS] Synthesizing text: "${text.substring(0, 30)}..." to ${tempFile}`);
 
     // Spawn the Python process
@@ -1402,7 +1402,7 @@ async function ttsHandler(req, res) {
       try {
         if (fs.existsSync(tempFile)) {
           const buffer = fs.readFileSync(tempFile);
-          res.setHeader('Content-Type', 'audio/wav');
+          res.setHeader('Content-Type', 'audio/mpeg');
           res.send(buffer);
           
           // Cleanup temp file asynchronously
