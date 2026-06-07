@@ -4,8 +4,8 @@ import edge_tts
 
 async def amain(text, output_path):
     try:
-        # Use en-IN-NeerjaNeural for a highly realistic, human-like Indian English female voice
-        communicate = edge_tts.Communicate(text, "en-IN-NeerjaNeural")
+        # Use en-IN-NeerjaExpressiveNeural for a highly realistic, human-like Indian English female voice
+        communicate = edge_tts.Communicate(text, "en-IN-NeerjaExpressiveNeural")
         await communicate.save(output_path)
         print("SUCCESS")
     except Exception as e:
