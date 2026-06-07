@@ -813,8 +813,13 @@ Tasks:
 
     try {
       const aiResponse = await callGroq(prompt, activeKey, systemPrompt);
+      let questionText = aiResponse.question || '';
+      const lowerQ = questionText.toLowerCase().trim();
+      if (!lowerQ.startsWith('hello') && !lowerQ.startsWith('hi') && !lowerQ.startsWith('welcome')) {
+        questionText = `Hello ${nameVal}, thank you for joining today's session. I'll be taking your interview for the ${difficultyVal} ${topicVal} role. Let's start with our first question: ${questionText}`;
+      }
       res.json({
-        question: aiResponse.question,
+        question: questionText,
         emotion: aiResponse.emotion || 'smiling',
         isMock: false,
         currentQuestionIndex: 0,
@@ -882,8 +887,13 @@ Respond ONLY in this JSON format:
 
   try {
     const aiResponse = await callGroq(prompt, activeKey, systemPrompt);
+    let questionText = aiResponse.question || '';
+    const lowerQ = questionText.toLowerCase().trim();
+    if (!lowerQ.startsWith('hello') && !lowerQ.startsWith('hi') && !lowerQ.startsWith('welcome')) {
+      questionText = `Hello ${nameVal}, thank you for joining today's session. I'll be taking your interview for the ${difficultyVal} ${topicVal} role. Let's start with our first question: ${questionText}`;
+    }
     res.json({
-      question: aiResponse.question,
+      question: questionText,
       emotion: aiResponse.emotion || 'smiling',
       isMock: false,
       currentQuestionIndex: 0,
