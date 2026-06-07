@@ -1112,14 +1112,8 @@ class AppOrchestrator {
         throw new Error(`Failed to upload offer: ${offerRes.status}`);
       }
 
-      // Build connection URL using cached network IP
-      let origin = window.location.origin;
-      if (this.cachedNetworkIp && this.cachedNetworkIp !== 'localhost') {
-        const protocol = window.location.protocol;
-        const port = window.location.port ? `:${window.location.port}` : '';
-        origin = `${protocol}//${this.cachedNetworkIp}${port}`;
-      }
-
+      // Build connection URL using the deployed Railway URL as requested
+      const origin = 'https://ai-avatar.up.railway.app';
       const connectionUrl = origin + '/mobile-cam.html?session=' + sessionId;
       console.log("[MobileDetect] Connection link URL:", connectionUrl);
 
